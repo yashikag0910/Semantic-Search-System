@@ -16,19 +16,7 @@ class SearchEngine:
         # determine which cluster this query belongs to
         cluster = self.clusterer.dominant_cluster(query_emb)
 
-        # check semantic cache first
-        entry, score, hit = self.cache.lookup(query_emb, cluster)
-
-        if hit:
-
-            return {
-                "query": text,
-                "cache_hit": True,
-                "matched_query": entry.query,
-                "similarity_score": float(score),
-                "result": entry.result,
-                "dominant_cluster": cluster
-            }
+        self.cache.add(text, query_emb, result_text)
 
         # if cache miss perform vector search
         scores, indices = self.vector_store.search(query_emb)

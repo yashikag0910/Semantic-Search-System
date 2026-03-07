@@ -1,86 +1,95 @@
 import numpy as np
-
-
-# simple cosine similarity function
-def cosine_similarity(a, b):
-
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+import faiss
 
 
 class CacheEntry:
 
-    def __init__(self, query, embedding, result, cluster):
+    def __init__(self, query, embedding, result):
 
         self.query = query
         self.embedding = embedding
         self.result = result
-        self.cluster = cluster
 
 
 class SemanticCache:
 
     def __init__(self, threshold=0.82):
 
-        # threshold determines when two queries are "similar enough"
+        # similarity threshold determines when two queries are "close enough"
         self.threshold = threshold
 
-        # cluster -> list of cache entries
-        self.cache = {}
+        self.entries = []
 
+        # statistics
         self.hit_count = 0
         self.miss_count = 0
 
-    # check if query already exists semantically
-    def lookup(self, query_embedding, cluster):
+        # FAISS index used for fast similarity lookup
+        self.index = None
+        self.dim = None
 
-        if cluster not in self.cache:
+
+    def initialize_index(self, embedding_dim):
+
+        self.dim = embedding_dim
+
+        # using cosine similarity via inner product
+        self.index = faiss.IndexFlatIP(self.dim)
+
+
+    def lookup(self, query_embedding):
+
+        if self.index is None or len(self.entries) == 0:
             self.miss_count += 1
-            return None, None, None
+            return None, None, False
 
-        best_score = 0
-        best_entry = None
+        query = np.array([query_embedding]).astype("float32")
 
-        # search only entries within the same cluster
-        for entry in self.cache[cluster]:
+        scores, indices = self.index.search(query, 1)
 
-            score = cosine_similarity(query_embedding, entry.embedding)
-
-            if score > best_score:
-                best_score = score
-                best_entry = entry
+        best_score = scores[0][0]
+        best_index = indices[0][0]
 
         if best_score >= self.threshold:
+
             self.hit_count += 1
-            return best_entry, best_score, True
+            entry = self.entries[best_index]
+
+            return entry, best_score, True
 
         self.miss_count += 1
         return None, best_score, False
 
-    # store new cache entry
-    def add(self, query, embedding, result, cluster):
 
-        entry = CacheEntry(query, embedding, result, cluster)
+    def add(self, query, embedding, result):
 
-        if cluster not in self.cache:
-            self.cache[cluster] = []
+        entry = CacheEntry(query, embedding, result)
 
-        self.cache[cluster].append(entry)
+        self.entries.append(entry)
 
-    # return cache statistics
+        emb = np.array([embedding]).astype("float32")
+
+        if self.index is None:
+            self.initialize_index(len(embedding))
+
+        self.index.add(emb)
+
+
     def stats(self):
 
         total = self.hit_count + self.miss_count
 
         return {
-            "total_entries": sum(len(v) for v in self.cache.values()),
+            "total_entries": len(self.entries),
             "hit_count": self.hit_count,
             "miss_count": self.miss_count,
             "hit_rate": self.hit_count / total if total > 0 else 0
         }
 
-    # clear the cache completely
+
     def clear(self):
 
-        self.cache = {}
+        self.entries = []
+        self.index = None
         self.hit_count = 0
         self.miss_count = 0
